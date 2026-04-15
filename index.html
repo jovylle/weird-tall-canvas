@@ -1,14 +1,201 @@
 <!DOCTYPE html>
 <html>
-<body style="margin:0; background:#111;">
+<body style="margin:0; background:#111; color:#fff; font-family:Arial,sans-serif;">
 <script type="module">
-import { createWeirdCanvas } from './src/generator.js';
+import {
+  createWeirdCanvas,
+  downloadWeirdCanvasImage,
+  isWeirdCanvasDownloadable
+} from './src/generator.js';
 
-createWeirdCanvas({
-  width: 200,
-  height: 10000,
-  mode: 'canvas-noise'
+const panel = document.createElement('div');
+panel.style.position = 'fixed';
+panel.style.top = '12px';
+panel.style.left = '12px';
+panel.style.zIndex = '9999';
+panel.style.background = 'rgba(0,0,0,0.8)';
+panel.style.border = '1px solid #444';
+panel.style.borderRadius = '8px';
+panel.style.padding = '10px';
+panel.style.display = 'grid';
+panel.style.gap = '8px';
+panel.style.minWidth = '220px';
+
+const widthInput = document.createElement('input');
+widthInput.type = 'number';
+widthInput.value = '300';
+widthInput.min = '1';
+widthInput.style.width = '100%';
+
+const heightInput = document.createElement('input');
+heightInput.type = 'number';
+heightInput.value = '10000';
+heightInput.min = '1';
+heightInput.style.width = '100%';
+
+const modeSelect = document.createElement('select');
+for (const mode of [
+  'canvas-noise',
+  'gradient',
+  'stripes',
+  'checkerboard',
+  'diagonal-lines',
+  'dots',
+  'grid',
+  'text',
+  'plain-color'
+]) {
+  const option = document.createElement('option');
+  option.value = mode;
+  option.textContent = mode;
+  modeSelect.appendChild(option);
+}
+modeSelect.value = 'canvas-noise';
+modeSelect.style.width = '100%';
+
+const colorInput = document.createElement('input');
+colorInput.type = 'color';
+colorInput.value = '#5b8cff';
+colorInput.style.width = '100%';
+
+const applyBtn = document.createElement('button');
+applyBtn.textContent = 'Apply Changes';
+applyBtn.style.padding = '8px 10px';
+applyBtn.style.cursor = 'pointer';
+
+const downloadBtn = document.createElement('button');
+downloadBtn.textContent = 'Download Image';
+downloadBtn.style.padding = '8px 10px';
+downloadBtn.style.cursor = 'pointer';
+
+const statusText = document.createElement('div');
+statusText.style.fontSize = '12px';
+statusText.style.color = '#bbb';
+statusText.textContent = 'Ready';
+
+const samplesWrap = document.createElement('div');
+samplesWrap.style.display = 'grid';
+samplesWrap.style.gridTemplateColumns = 'repeat(3, minmax(0, 1fr))';
+samplesWrap.style.gap = '6px';
+
+const sampleStyles = {
+  'plain-color': '#5b8cff',
+  stripes: 'repeating-linear-gradient(to bottom, #000 0 6px, #fff 6px 12px)',
+  checkerboard:
+    'conic-gradient(#f5f5f5 25%, #111 0 50%, #f5f5f5 0 75%, #111 0) 0 0 / 16px 16px',
+  'diagonal-lines':
+    'repeating-linear-gradient(45deg, #0f0f0f 0 8px, #7ce7ff 8px 11px, #0f0f0f 11px 20px)',
+  dots:
+    'radial-gradient(circle at 6px 6px, #ff4d9a 0 3px, transparent 3px), radial-gradient(circle at 14px 14px, #ffe066 0 3px, transparent 3px), #0d1020',
+  grid:
+    'linear-gradient(#2ed573 1px, transparent 1px), linear-gradient(90deg, #2ed573 1px, transparent 1px), #121212',
+  gradient: 'linear-gradient(to bottom, #ff4d9a, #ff9f43, #ffe066, #2ed573, #1e90ff, #8e44ad)',
+  text: 'linear-gradient(to bottom, #101010, #111)'
+};
+
+function makeField(labelText, inputEl) {
+  const label = document.createElement('label');
+  label.style.display = 'grid';
+  label.style.gap = '4px';
+  label.style.fontSize = '12px';
+  label.textContent = labelText;
+  label.appendChild(inputEl);
+  return label;
+}
+
+panel.appendChild(makeField('Width', widthInput));
+panel.appendChild(makeField('Height', heightInput));
+panel.appendChild(makeField('Mode', modeSelect));
+panel.appendChild(makeField('Plain Color', colorInput));
+panel.appendChild(makeField('Pattern Samples', samplesWrap));
+panel.appendChild(applyBtn);
+panel.appendChild(downloadBtn);
+panel.appendChild(statusText);
+document.body.appendChild(panel);
+
+let strip = null;
+
+function updateDownloadState() {
+  const canDownload = isWeirdCanvasDownloadable(strip);
+  downloadBtn.disabled = !canDownload;
+  downloadBtn.style.opacity = canDownload ? '1' : '0.5';
+  downloadBtn.style.cursor = canDownload ? 'pointer' : 'not-allowed';
+  downloadBtn.title = canDownload
+    ? 'Download current output as JPG (full size, may fail on huge dimensions)'
+    : 'This output is not downloadable right now.';
+
+  const mode = modeSelect.value;
+  colorInput.disabled = mode !== 'plain-color';
+  colorInput.style.opacity = mode === 'plain-color' ? '1' : '0.5';
+}
+
+function createSampleButton(mode) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.title = mode;
+  button.style.height = '36px';
+  button.style.border = '1px solid #555';
+  button.style.borderRadius = '6px';
+  button.style.cursor = 'pointer';
+  button.style.background = sampleStyles[mode] ?? '#333';
+  if (mode === 'grid') {
+    button.style.backgroundSize = '12px 12px, 12px 12px';
+  } else if (mode === 'dots') {
+    button.style.backgroundSize = '20px 20px, 20px 20px, auto';
+  }
+  button.addEventListener('click', () => {
+    modeSelect.value = mode;
+    updateDownloadState();
+    renderStrip();
+  });
+  return button;
+}
+
+function renderStrip() {
+  if (strip && strip.parentNode) {
+    strip.remove();
+  }
+
+  const width = Number.parseInt(widthInput.value, 10) || 300;
+  const height = Number.parseInt(heightInput.value, 10) || 10000;
+  const mode = modeSelect.value;
+  const color = colorInput.value;
+
+  strip = createWeirdCanvas({ width, height, mode, color });
+  if (isWeirdCanvasDownloadable(strip)) {
+    if (strip instanceof HTMLCanvasElement) {
+      statusText.textContent = `Rendered: ${mode} (${width} x ${height}) - downloadable as JPG`;
+    } else {
+      statusText.textContent = `Rendered: ${mode} (${width} x ${height}) - downloadable as full-size JPG (may fail)`;
+    }
+  } else {
+    statusText.textContent = `Rendered: ${mode} (${width} x ${height}) - lightweight fallback (not downloadable)`;
+  }
+  updateDownloadState();
+}
+
+applyBtn.addEventListener('click', () => {
+  renderStrip();
 });
+
+modeSelect.addEventListener('change', () => {
+  updateDownloadState();
+});
+
+downloadBtn.addEventListener('click', async () => {
+  try {
+    const filename = 'weird-tall-canvas.jpg';
+    await downloadWeirdCanvasImage(strip, { filename });
+    statusText.textContent = 'Downloaded JPG';
+  } catch (error) {
+    statusText.textContent = error instanceof Error ? error.message : 'Export failed.';
+  }
+});
+
+renderStrip();
+for (const mode of ['plain-color', 'stripes', 'checkerboard', 'diagonal-lines', 'dots', 'grid']) {
+  samplesWrap.appendChild(createSampleButton(mode));
+}
 </script>
 </body>
 </html>
